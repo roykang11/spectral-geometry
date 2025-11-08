@@ -110,20 +110,46 @@ def mask_from_image(file_path: str | Path, grid: Grid, threshold: float = 0.5) -
 def create_domain(
     resolution: int = 120,
     bounds: Sequence[float] = (-1.0, 1.0, -1.0, 1.0),
-    shape: Literal["circle", "square", "rectangle", "l-shape", "annulus"] | None = "circle",
+    shape: Literal["circle", "square", "rectangle", "l-shape", "annulus", "polygon"] | None = "circle",
     *,
     mask: np.ndarray | None = None,
     mask_fn: MaskFunction | None = None,
+    mask_path: str | Path | None = None,
     params: dict | None = None,
     name: str | None = None,
 ) -> Domain:
-    """Create a domain using a built-in shape or custom mask."""
+    """Create a domain using a built-in shape or custom mask.
+
+    Parameters
+    ----------
+    resolution:
+        Number of grid points along one axis (including boundary).
+    bounds:
+        (xmin, xmax, ymin, ymax) covering the region to discretize.
+    shape:
+        Built-in shape keyword. Use ``None`` to rely solely on ``mask``, ``mask_fn``,
+        or ``mask_path``.
+    mask:
+        Boolean array aligned with the generated grid.
+    mask_fn:
+        Callable that receives ``(X, Y)`` meshgrids and returns a boolean mask.
+    mask_path:
+        Image file used to rasterize the domain (white pixels are interpreted as inside).
+    params:
+        Extra keyword arguments consumed by specific builders (e.g., ``radius`` for circle,
+        ``vertices`` for polygon, ``threshold`` for image mask).
+    name:
+        Optional display name for the resulting domain.
+    """
 
     grid = create_grid(bounds=bounds, resolution=resolution)
     params = params or {}
 
     if mask is not None:
         domain_mask = np.asarray(mask, dtype=bool)
+    elif mask_path is not None:
+        threshold = params.get("threshold", 0.5)
+        domain_mask = mask_from_image(mask_path, grid, threshold=threshold)
     elif mask_fn is not None:
         domain_mask = mask_from_callable(grid, mask_fn)
     elif shape == "circle":
@@ -144,8 +170,15 @@ def create_domain(
             inner_radius=params.get("inner_radius", 0.4),
             outer_radius=params.get("outer_radius", 0.9),
         )
+    elif shape == "polygon":
+        vertices = params.get("vertices")
+        if vertices is None:
+            raise ValueError("Polygon domain requires 'vertices' in params.")
+        domain_mask = mask_polygon(grid, vertices)
     else:
-        raise ValueError(f"Unsupported shape '{shape}'. Provide mask or mask_fn instead.")
+        raise ValueError(
+            f"Unsupported shape '{shape}'. Provide mask/mask_fn/mask_path for custom domains."
+        )
 
     domain_name = name or (shape or "custom")
     return Domain(name=domain_name, grid=grid, mask=domain_mask)

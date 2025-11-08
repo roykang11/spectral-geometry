@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import tempfile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,23 +20,51 @@ except Exception:  # pragma: no cover - optional dependency
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Spectral Geometry Explorer CLI")
-    parser.add_argument("--shape", default="circle", help="Domain shape (circle, square, rectangle, l-shape, annulus)")
+    parser.add_argument(
+        "--shape",
+        default="circle",
+        help="Domain shape (circle, square, rectangle, l-shape, annulus). Ignored if --mask-image is provided.",
+    )
     parser.add_argument("--resolution", type=int, default=80, help="Grid resolution along one axis")
     parser.add_argument("--k", type=int, default=6, help="Number of eigenmodes to compute")
     parser.add_argument("--demo", action="store_true", help="Run a quick demo and display plots")
     parser.add_argument("--show", action="store_true", help="Display matplotlib plots")
     parser.add_argument("--save-fig", type=Path, help="Path to save a gallery of the first modes")
     parser.add_argument("--export-wav", type=Path, help="Path to export synthesized audio")
+    parser.add_argument("--mask-image", type=Path, help="Path to an image whose white pixels define the drum shape")
+    parser.add_argument(
+        "--mask-threshold", type=float, default=0.5, help="Threshold in [0,1] for binarizing --mask-image (default: 0.5)"
+    )
+    parser.add_argument(
+        "--bounds",
+        type=float,
+        nargs=4,
+        metavar=("xmin", "xmax", "ymin", "ymax"),
+        default=(-1.0, 1.0, -1.0, 1.0),
+        help="Domain bounding box (default: -1 1 -1 1)",
+    )
     return parser.parse_args(argv)
 
 
 def run_cli(argv: list[str]) -> None:
     args = _parse_args(argv)
-    params = {}
-    if args.shape == "rectangle":
+    params: dict = {}
+    shape = args.shape
+
+    if args.mask_image is not None:
+        shape = None
+        params["threshold"] = args.mask_threshold
+    elif shape == "rectangle":
         params = {"width": 1.8, "height": 1.0}
 
-    domain = geometry.create_domain(resolution=args.resolution, shape=args.shape, params=params)
+    domain = geometry.create_domain(
+        resolution=args.resolution,
+        shape=shape,
+        params=params,
+        mask_path=args.mask_image,
+        bounds=args.bounds,
+        name="custom" if args.mask_image else None,
+    )
     print(domain.summary())
 
     result = solver.solve_eigenmodes(domain, k=args.k)
@@ -67,10 +96,12 @@ def run_streamlit() -> None:  # pragma: no cover - requires UI context
     st.markdown("Compute and visualize the vibration modes of 2D drums.")
 
     with st.sidebar:
-        shape = st.selectbox("Shape", ["circle", "square", "rectangle", "l-shape", "annulus"])
+        shape_options = ["circle", "square", "rectangle", "l-shape", "annulus", "custom image"]
+        shape = st.selectbox("Shape", shape_options)
         resolution = st.slider("Resolution", 40, 160, 80, step=10)
         k = st.slider("Number of modes", 3, 20, 6)
         wave_speed = st.number_input("Wave speed (m/s)", value=340.0)
+        mask_path: Path | None = None
         if shape == "rectangle":
             width = st.slider("Width", 0.5, 2.5, 1.8)
             height = st.slider("Height", 0.5, 2.5, 1.0)
@@ -79,10 +110,34 @@ def run_streamlit() -> None:  # pragma: no cover - requires UI context
             inner = st.slider("Inner radius", 0.1, 0.9, 0.4)
             outer = st.slider("Outer radius", inner + 0.05, 1.2, 0.9)
             params = {"inner_radius": inner, "outer_radius": outer}
+        elif shape == "custom image":
+            threshold = st.slider("Mask threshold", 0.1, 0.9, 0.5, step=0.05)
+            uploaded = st.file_uploader(
+                "Upload a binary mask (white pixels are inside the drum)", type=["png", "jpg", "jpeg", "bmp"]
+            )
+            params = {"threshold": threshold}
+            if uploaded is not None:
+                suffix = Path(uploaded.name).suffix or ".png"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(uploaded.getbuffer())
+                    mask_path = Path(tmp.name)
+            else:
+                st.info("Upload an image to generate a custom drum shape.")
+                st.stop()
         else:
             params = {}
 
-    domain = geometry.create_domain(shape=shape, resolution=resolution, params=params)
+    shape_key = None if shape == "custom image" else shape
+    cleanup_path = mask_path
+    domain = geometry.create_domain(
+        shape=shape_key,
+        resolution=resolution,
+        params=params,
+        mask_path=str(mask_path) if mask_path is not None else None,
+    )
+
+    if cleanup_path is not None:
+        cleanup_path.unlink(missing_ok=True)
     result = solver.solve_eigenmodes(domain, k=k)
 
     cols = st.columns([1, 1])

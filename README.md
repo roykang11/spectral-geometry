@@ -31,6 +31,7 @@ The CLI command prints the eigenvalue spectrum to the terminal, refreshes the fi
 - Finite-difference discretization of the Laplace operator on masked 2D grids
 - Sparse eigenvalue solvers powered by SciPy for efficient computation of low-frequency modes
 - Modular domain generation (circle, rectangle, polygon, custom image masks)
+- Simple CLI flags for turning any black/white bitmap into a drum mask
 - Visualization utilities for static plots, animations, and spectral comparisons
 - Audio synthesis to "hear" the drum by mapping eigenvalues to audible frequencies
 - Optional Streamlit app for interactive exploration of shapes and modes
@@ -62,6 +63,23 @@ spectral-drum/
    pip install -r requirements.txt
    ```
 3. Launch Streamlit (optional): `streamlit run src/app.py`
+
+## Custom Shapes
+### From the command line
+Supply a binary (or high-contrast) image where white pixels indicate the drum interior:
+
+```bash
+python -m src.app --mask-image data/domains/custom_mask.png \
+  --mask-threshold 0.55 \
+  --save-fig data/domains/custom_modes.png
+```
+
+Use `--bounds xmin xmax ymin ymax` if your shape needs a different spatial window.
+
+### In the Streamlit app
+Choose **custom image** in the sidebar, upload a PNG/JPG/BMP mask, tune the threshold slider, and the app will rasterize it automatically. All other controls (resolution, modes, audio frequency overlay) work just like the built-ins.
+
+You can also call `geometry.create_domain(shape="polygon", params={"vertices": [...]})` in Python to rasterize analytic shapes, or pass your own boolean mask directly.
 
 ## Roadmap
 - Implement additional domain loaders (SVG contours, bitmap masks)
